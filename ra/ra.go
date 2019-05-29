@@ -1702,6 +1702,35 @@ func revokeEvent(state, serial, cn string, names []string, revocationCode revoca
 	)
 }
 
+// generatecachePurgeData prepares the cachePurgeData message to pass on to gRPC. Purger
+// services are then able to prepare the request to the CDN.
+func generatecachePurgeData(der []byte, issuer *x509.Certificate) ([]string, error) {
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := ocsp.CreateRequest(cert, issuer, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a GET and special Akamai POST style OCSP url for each endpoint in cert.OCSPServer
+	cachePurgeData := []string{}
+	for _, ocspServer := range cert.OCSPServer {
+		if !strings.HasSuffix(ocspServer, "/") {
+			ocspServer += "/"
+		}
+		// Generate cachePurgeData message
+		cachePurgeData = append(
+			hash := md5.Sum(req),
+			encReq := base64.StdEncoding.EncodeToString(req),
+			ocspServer,
+		)
+	}
+	return cachePurgeData, nil
+}
+
 // revokeCertificate generates a revoked OCSP response for the given certificate, stores
 // the revocation information, and purges OCSP request URLs from Akamai.
 func (ra *RegistrationAuthorityImpl) revokeCertificate(ctx context.Context, cert x509.Certificate, code revocation.Reason) error {
@@ -1728,7 +1757,7 @@ func (ra *RegistrationAuthorityImpl) revokeCertificate(ctx context.Context, cert
 	if err != nil {
 		return err
 	}
-	purgeURLs, err := akamai.GeneratePurgeURLs(cert.Raw, ra.issuer)
+	purgeURLs, err := generatecachePurgeData(cert.Raw, ra.issuer)
 	if err != nil {
 		return err
 	}
